@@ -1,25 +1,28 @@
-const express = require('express');
-const cors = require('cors');
+const express = require("express");
+const cors = require("cors");
+
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: "10mb" }));
 
-app.post('/match', async (req, res) => {
+app.post("/match", async (req, res) => {
   const { jd, resume } = req.body;
   const apiKey = process.env.GROQ_API_KEY;
 
-  // Validate input
   if (!jd || !resume) {
     return res.status(400).json({
-      error: 'Job Description and Resume are required.'
+      score: 0,
+      verdict: "Invalid Input",
+      summary: "Please provide both Job Description and Resume."
     });
   }
 
-  // Validate API key
   if (!apiKey) {
     return res.status(500).json({
-      error: 'GROQ_API_KEY is not configured.'
+      score: 0,
+      verdict: "Server Error",
+      summary: "Groq API key is missing."
     });
   }
 
@@ -29,19 +32,21 @@ You are an expert recruiter.
 
 Compare the following Job Description and Resume.
 
-Return ONLY valid JSON in this format:
+Return ONLY valid JSON.
+
+Example:
 
 {
   "score": 85,
   "verdict": "Strong Match",
-  "summary": "The candidate matches most required skills and experience."
+  "summary": "The resume matches most required skills and experience."
 }
 
-JOB DESCRIPTION:
-${jd.substring(0, 2000)}
+Job Description:
+${jd.substring(0, 2500)}
 
-RESUME:
-${resume.substring(0, 2000)}
+Resume:
+${resume.substring(0, 2500)}
 `;
 
     const response = await fetch(
@@ -50,72 +55,82 @@ ${resume.substring(0, 2000)}
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: 'llama-3.1-8b-instant',
+          model: "llama-3.1-8b-instant",
           messages: [
             {
               role: "user",
-              content: prompt,
-            },
+              content: prompt
+            }
           ],
-          temperature: 0.2,
-          max_tokens: 300,
-        }),
+          temperature: 0.1,
+          max_tokens: 300
+        })
       }
     );
 
     const data = await response.json();
 
-    console.log("Groq Response:");
-    console.log(JSON.stringify(data, null, 2));
+    console.log(data);
 
-    // Check if Groq returned an error
     if (data.error) {
-      return res.status(500).json({
-        error: data.error.message || "Groq API Error",
+      return res.json({
+        score: 0,
+        verdict: "API Error",
+        summary: data.error.message
       });
     }
 
-    const raw = data?.choices?.[0]?.message?.content;
+    let raw = data?.choices?.[0]?.message?.content || "";
 
-    // Prevent "undefined.match()" error
-    if (!raw) {
-      return res.status(500).json({
-        error: "Groq did not return any content.",
-        response: data,
-      });
+    raw = raw
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+
+    let result;
+
+    try {
+      result = JSON.parse(raw);
+    } catch (e) {
+      const match = raw.match(/\{[\s\S]*\}/);
+
+      if (match) {
+        result = JSON.parse(match[0]);
+      } else {
+        result = {
+          score: 0,
+          verdict: "Unable to Parse",
+          summary: raw
+        };
+      }
     }
 
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-
-    if (!jsonMatch) {
-      return res.status(500).json({
-        error: "Groq returned invalid JSON.",
-        raw: raw,
-      });
-    }
-
-    const result = JSON.parse(jsonMatch[0]);
+    result.score = Number(result.score) || 0;
+    result.verdict = result.verdict || "No Verdict";
+    result.summary = result.summary || "No summary returned.";
 
     res.json(result);
 
   } catch (error) {
-    console.error(error);
+    console.log(error);
 
-    res.status(500).json({
-      error: error.message,
+    res.json({
+      score: 0,
+      verdict: "Server Error",
+      summary: error.message
     });
   }
 });
 
 app.get("/", (req, res) => {
-  res.send("✅ ResuMatch Server is running!");
+  res.send("ResuMatch Server Running Successfully");
 });
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
