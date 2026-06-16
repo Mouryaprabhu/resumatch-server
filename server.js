@@ -53,7 +53,7 @@ ${resume.substring(0, 2000)}
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "llama3-8b-8192llama-3.1-8b-instant",
+          model: 'llama-3.1-8b-instant',
           messages: [
             {
               role: "user",
