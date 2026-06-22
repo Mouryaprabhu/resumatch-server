@@ -7,22 +7,8 @@ app.use(express.json({ limit: "10mb" }));
 app.post("/match", async (req, res) => {
   const { jd, resume } = req.body;
   const apiKey = process.env.GROQ_API_KEY;
-  if (!jd || !resume) {
-    return res.json({
-      score: 0,
-      relevant: false,
-      verdict: "Missing Input",
-      summary: "Please provide both Job Description and Resume."
-    });
-  }
-  if (!apiKey) {
-    return res.json({
-      score: 0,
-      relevant: false,
-      verdict: "Server Error",
-      summary: "GROQ_API_KEY is missing."
-    });
-  }
+  if (!jd || !resume) return res.json({ score: 0, relevant: false, verdict: "Missing Input", summary: "Please provide both Job Description and Resume." });
+  if (!apiKey) return res.json({ score: 0, relevant: false, verdict: "Server Error", summary: "GROQ_API_KEY is missing." });
   try {
     const prompt = `
 You are an expert ATS (Applicant Tracking System) evaluator with 10 years of recruiting experience.
@@ -56,96 +42,42 @@ Return ONLY valid JSON, nothing else:
   "missing_skills": ["<skill1>", "<skill2>"]
 }
 `;
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          temperature: 0,
-          max_tokens: 500,
-          messages: [{ role: "user", content: prompt }]
-        })
-      }
-    );
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: "llama-3.3-70b-versatile", temperature: 0, max_tokens: 500, messages: [{ role: "user", content: prompt }] })
+    });
     const data = await response.json();
     const raw = data?.choices?.[0]?.message?.content || "";
-    console.log("AI Response:", raw);
-    const first = raw.indexOf("{");
-    const last = raw.lastIndexOf("}");
-    if (first === -1 || last === -1) {
-      return res.json({
-        score: 0,
-        relevant: false,
-        verdict: "AI Error",
-        summary: "AI did not return valid JSON."
-      });
-    }
+    const first = raw.indexOf("{"); const last = raw.lastIndexOf("}");
+    if (first === -1 || last === -1) return res.json({ score: 0, relevant: false, verdict: "AI Error", summary: "AI did not return valid JSON." });
     const jsonString = raw.substring(first, last + 1);
     let result;
-    try {
-      result = JSON.parse(jsonString);
-    } catch {
-      return res.json({
-        score: 0,
-        relevant: false,
-        verdict: "Parse Error",
-        summary: raw
-      });
-    }
-    return res.json({
-      score: Number(result.score) || 0,
-      relevant: result.relevant === true,
-      verdict: result.verdict || "Unknown",
-      summary: result.summary || "No summary available.",
-      matched_skills: result.matched_skills || [],
-      missing_skills: result.missing_skills || []
-    });
-  } catch (err) {
-    console.log(err);
-    return res.json({
-      score: 0,
-      relevant: false,
-      verdict: "Server Error",
-      summary: err.message
-    });
-  }
+    try { result = JSON.parse(jsonString); } catch { return res.json({ score: 0, relevant: false, verdict: "Parse Error", summary: raw }); }
+    return res.json({ score: Number(result.score) || 0, relevant: result.relevant === true, verdict: result.verdict || "Unknown", summary: result.summary || "No summary available.", matched_skills: result.matched_skills || [], missing_skills: result.missing_skills || [] });
+  } catch (err) { return res.json({ score: 0, relevant: false, verdict: "Server Error", summary: err.message }); }
 });
 
 app.post("/extract", async (req, res) => {
   const { resume } = req.body;
   const apiKey = process.env.GROQ_API_KEY;
-
-  if (!resume) {
-    return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "No resume text provided." });
-  }
-  if (!apiKey) {
-    return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "GROQ_API_KEY is missing." });
-  }
-
+  if (!resume) return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "No resume text provided." });
+  if (!apiKey) return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "GROQ_API_KEY is missing." });
   try {
     const prompt = `
 You are a resume data extraction expert. Extract ONLY these 5 fields from the resume text below:
-
 1. Name - the candidate's full name
 2. Phone - phone number (if multiple, pick the primary one)
 3. Email - email address
 4. City - current city/location of the candidate
 5. Education - highest degree and institution (e.g. "B.Tech, IIT Delhi")
-
 RULES:
 - If a field is not found in the resume, return an empty string "" for that field
 - Do not guess or invent information
-- Extract phone numbers exactly as written (keep country code if present)
-- For education, keep it short (degree + institution only, not full descriptions)
-
+- Extract phone numbers exactly as written
+- For education, keep it short (degree + institution only)
 RESUME TEXT:
 ${resume.substring(0, 3000)}
-
 Return ONLY this JSON and nothing else:
 {
   "name": "",
@@ -155,56 +87,75 @@ Return ONLY this JSON and nothing else:
   "education": ""
 }
 `;
-
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          temperature: 0,
-          max_tokens: 300,
-          messages: [{ role: "user", content: prompt }]
-        })
-      }
-    );
-
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: "llama-3.3-70b-versatile", temperature: 0, max_tokens: 300, messages: [{ role: "user", content: prompt }] })
+    });
     const data = await response.json();
     const raw = data?.choices?.[0]?.message?.content || "";
-    console.log("Extract AI Response:", raw);
-
-    const first = raw.indexOf("{");
-    const last = raw.lastIndexOf("}");
-
-    if (first === -1 || last === -1) {
-      return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "AI did not return valid JSON." });
-    }
-
+    const first = raw.indexOf("{"); const last = raw.lastIndexOf("}");
+    if (first === -1 || last === -1) return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "AI did not return valid JSON." });
     const jsonString = raw.substring(first, last + 1);
     let result;
+    try { result = JSON.parse(jsonString); } catch { return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "Could not parse AI response." }); }
+    return res.json({ name: result.name || "", phone: result.phone || "", email: result.email || "", city: result.city || "", education: result.education || "" });
+  } catch (err) { return res.json({ name: "", phone: "", email: "", city: "", education: "", error: err.message }); }
+});
 
-    try {
-      result = JSON.parse(jsonString);
-    } catch {
-      return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "Could not parse AI response." });
-    }
-
-    return res.json({
-      name: result.name || "",
-      phone: result.phone || "",
-      email: result.email || "",
-      city: result.city || "",
-      education: result.education || ""
+app.post("/generate-jd", async (req, res) => {
+  const { jobTitle, department, experience, skills, location, employmentType } = req.body;
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!jobTitle) return res.json({ error: "Job title is required." });
+  if (!apiKey) return res.json({ error: "GROQ_API_KEY is missing." });
+  try {
+    const prompt = `
+You are an expert HR professional and job description writer with 15 years of experience.
+Write a professional, detailed, and attractive Job Description based on the details below.
+JOB DETAILS:
+- Job Title: ${jobTitle}
+- Department: ${department || 'Not specified'}
+- Experience Required: ${experience || 'Not specified'}
+- Key Skills: ${skills || 'Not specified'}
+- Location: ${location || 'Not specified'}
+- Employment Type: ${employmentType || 'Full Time'}
+Write a complete JD with these exact sections:
+1. About the Role
+2. Key Responsibilities (6-8 bullet points)
+3. Required Qualifications (5-6 bullet points)
+4. Preferred Skills (3-4 bullet points)
+5. What We Offer / Benefits (4-5 bullet points)
+RULES:
+- Make it professional, clear, and engaging
+- Use action verbs for responsibilities
+- Be specific about skills and qualifications
+- Keep total length between 300-500 words
+Return ONLY this JSON and nothing else:
+{
+  "structured": {
+    "about": "<2-3 sentences about the role>",
+    "responsibilities": ["<point1>", "<point2>", "<point3>", "<point4>", "<point5>", "<point6>"],
+    "qualifications": ["<point1>", "<point2>", "<point3>", "<point4>", "<point5>"],
+    "preferred": ["<point1>", "<point2>", "<point3>"],
+    "benefits": ["<point1>", "<point2>", "<point3>", "<point4>"]
+  },
+  "plain": "<full plain text version of the JD, all sections combined into one readable block>"
+}
+`;
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: "llama-3.3-70b-versatile", temperature: 0.7, max_tokens: 1500, messages: [{ role: "user", content: prompt }] })
     });
-
-  } catch (err) {
-    console.log(err);
-    return res.json({ name: "", phone: "", email: "", city: "", education: "", error: err.message });
-  }
+    const data = await response.json();
+    const raw = data?.choices?.[0]?.message?.content || "";
+    const first = raw.indexOf("{"); const last = raw.lastIndexOf("}");
+    if (first === -1 || last === -1) return res.json({ error: "AI did not return valid JSON." });
+    const jsonString = raw.substring(first, last + 1);
+    let result;
+    try { result = JSON.parse(jsonString); } catch { return res.json({ error: "Could not parse AI response." }); }
+    return res.json({ structured: result.structured, plain: result.plain });
+  } catch (err) { return res.json({ error: err.message }); }
 });
 
 app.get("/", (req, res) => {
