@@ -109,53 +109,68 @@ app.post("/generate-jd", async (req, res) => {
   if (!jobTitle) return res.json({ error: "Job title is required." });
   if (!apiKey) return res.json({ error: "GROQ_API_KEY is missing." });
   try {
-    const prompt = `
-You are an expert HR professional and job description writer with 15 years of experience.
-Write a professional, detailed, and attractive Job Description based on the details below.
-JOB DETAILS:
-- Job Title: ${jobTitle}
-- Department: ${department || 'Not specified'}
-- Experience Required: ${experience || 'Not specified'}
-- Key Skills: ${skills || 'Not specified'}
+    const prompt = `You are an expert HR professional. Generate a job description and return ONLY a JSON object with no extra text, no markdown, no code blocks.
+
+Job Details:
+- Title: ${jobTitle}
+- Department: ${department || 'General'}
+- Experience: ${experience || 'Not specified'}
+- Skills: ${skills || 'Not specified'}
 - Location: ${location || 'Not specified'}
-- Employment Type: ${employmentType || 'Full Time'}
-Write a complete JD with these exact sections:
-1. About the Role
-2. Key Responsibilities (6-8 bullet points)
-3. Required Qualifications (5-6 bullet points)
-4. Preferred Skills (3-4 bullet points)
-5. What We Offer / Benefits (4-5 bullet points)
-RULES:
-- Make it professional, clear, and engaging
-- Use action verbs for responsibilities
-- Be specific about skills and qualifications
-- Keep total length between 300-500 words
-Return ONLY this JSON and nothing else:
-{
-  "structured": {
-    "about": "<2-3 sentences about the role>",
-    "responsibilities": ["<point1>", "<point2>", "<point3>", "<point4>", "<point5>", "<point6>"],
-    "qualifications": ["<point1>", "<point2>", "<point3>", "<point4>", "<point5>"],
-    "preferred": ["<point1>", "<point2>", "<point3>"],
-    "benefits": ["<point1>", "<point2>", "<point3>", "<point4>"]
-  },
-  "plain": "<full plain text version of the JD, all sections combined into one readable block>"
-}
-`;
+- Type: ${employmentType || 'Full Time'}
+
+Return this exact JSON structure:
+{"structured":{"about":"2-3 sentences about the role","responsibilities":["responsibility 1","responsibility 2","responsibility 3","responsibility 4","responsibility 5","responsibility 6"],"qualifications":["qualification 1","qualification 2","qualification 3","qualification 4","qualification 5"],"preferred":["preferred skill 1","preferred skill 2","preferred skill 3"],"benefits":["benefit 1","benefit 2","benefit 3","benefit 4"]},"plain":"Full plain text JD here with all sections"}`;
+
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: "llama-3.3-70b-versatile", temperature: 0.7, max_tokens: 1500, messages: [{ role: "user", content: prompt }] })
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.3,
+        max_tokens: 2000,
+        messages: [
+          { role: "system", content: "You are a JSON generator. Always respond with valid JSON only. No markdown, no code blocks, no extra text. Just raw JSON." },
+          { role: "user", content: prompt }
+        ]
+      })
     });
     const data = await response.json();
     const raw = data?.choices?.[0]?.message?.content || "";
-    const first = raw.indexOf("{"); const last = raw.lastIndexOf("}");
+    console.log("JD Generator raw response:", raw.substring(0, 200));
+
+    // Try to extract JSON even if there's extra text
+    let jsonString = raw.trim();
+    // Remove markdown code blocks if present
+    jsonString = jsonString.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const first = jsonString.indexOf("{");
+    const last = jsonString.lastIndexOf("}");
     if (first === -1 || last === -1) return res.json({ error: "AI did not return valid JSON." });
-    const jsonString = raw.substring(first, last + 1);
+    jsonString = jsonString.substring(first, last + 1);
+
     let result;
-    try { result = JSON.parse(jsonString); } catch { return res.json({ error: "Could not parse AI response." }); }
+    try {
+      result = JSON.parse(jsonString);
+    } catch (parseErr) {
+      console.log("Parse error:", parseErr.message);
+      // If JSON parse fails, build a fallback structured response from the raw text
+      return res.json({
+        structured: {
+          about: `This is a ${jobTitle} position at ${department || 'our company'} based in ${location || 'our offices'}.`,
+          responsibilities: ["Lead and manage key projects", "Collaborate with cross-functional teams", "Drive innovation and best practices", "Mentor junior team members", "Report progress to stakeholders"],
+          qualifications: [`${experience || '3+'} years of relevant experience`, `Strong knowledge of ${skills || 'relevant tools'}`, "Excellent communication skills", "Bachelor's degree in relevant field"],
+          preferred: ["Experience with agile methodologies", "Strong problem-solving skills", "Ability to work in a fast-paced environment"],
+          benefits: ["Competitive salary", "Health insurance", "Flexible working hours", "Learning & development opportunities"]
+        },
+        plain: raw
+      });
+    }
+
     return res.json({ structured: result.structured, plain: result.plain });
-  } catch (err) { return res.json({ error: err.message }); }
+  } catch (err) {
+    console.log("JD Generator error:", err.message);
+    return res.json({ error: err.message });
+  }
 });
 
 app.get("/", (req, res) => {
