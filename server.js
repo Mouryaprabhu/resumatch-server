@@ -9,55 +9,89 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
+// ── OCR using OCR.space API ──────────────────────────────────────────
+async function ocrExtract(fileBuffer, fileName) {
+  try {
+    const ocrKey = process.env.OCR_SPACE_API_KEY;
+    if (!ocrKey) return '';
+
+    const FormData = require('form-data');
+    const form = new FormData();
+    form.append('file', fileBuffer, { filename: fileName, contentType: 'application/pdf' });
+    form.append('apikey', ocrKey);
+    form.append('language', 'eng');
+    form.append('isOverlayRequired', 'false');
+    form.append('detectOrientation', 'true');
+    form.append('scale', 'true');
+    form.append('OCREngine', '2');
+
+    const response = await fetch('https://api.ocr.space/parse/image', {
+      method: 'POST',
+      headers: form.getHeaders(),
+      body: form
+    });
+
+    const data = await response.json();
+    if (data.ParsedResults && data.ParsedResults.length > 0) {
+      const text = data.ParsedResults.map(r => r.ParsedText).join(' ').replace(/\s+/g, ' ').trim();
+      console.log(`OCR extracted ${text.length} characters`);
+      return text;
+    }
+    return '';
+  } catch(e) {
+    console.log('OCR error:', e.message);
+    return '';
+  }
+}
+
 // ── Extract text from uploaded file ─────────────────────────────────
 async function extractTextFromFile(file) {
   const ext = file.originalname.split('.').pop().toLowerCase();
-  console.log(`Extracting text from: ${file.originalname} (${ext}), size: ${file.buffer.length} bytes`);
-  
+  console.log(`Extracting: ${file.originalname} (${ext}), size: ${file.buffer.length} bytes`);
+
   if (ext === 'pdf') {
     try {
+      // First try normal PDF text extraction
       const data = await pdfParse(file.buffer);
       const text = data.text.replace(/\s+/g, ' ').trim();
-      console.log(`PDF extracted ${text.length} characters`);
+      console.log(`PDF text extracted: ${text.length} characters`);
+
+      // If text is too short, it's a scanned PDF — use OCR
+      if (text.length < 100) {
+        console.log('PDF text too short, trying OCR...');
+        const ocrText = await ocrExtract(file.buffer, file.originalname);
+        return ocrText;
+      }
       return text;
     } catch(e) {
-      console.log('PDF parse error:', e.message);
-      return '';
+      console.log('PDF parse failed, trying OCR:', e.message);
+      return await ocrExtract(file.buffer, file.originalname);
     }
   } else if (ext === 'docx') {
     try {
       const result = await mammoth.extractRawText({ buffer: file.buffer });
       const text = result.value.replace(/\s+/g, ' ').trim();
-      console.log(`DOCX extracted ${text.length} characters`);
+      console.log(`DOCX extracted: ${text.length} characters`);
       return text;
     } catch(e) {
-      console.log('DOCX parse error:', e.message);
+      console.log('DOCX error:', e.message);
       return '';
     }
   } else if (ext === 'doc') {
     try {
-      let text = '';
+      let text = '', chunk = '';
       const bytes = new Uint8Array(file.buffer);
-      let chunk = '';
       for (let i = 0; i < bytes.length; i++) {
         const c = bytes[i];
         if (c >= 32 && c < 127) chunk += String.fromCharCode(c);
         else { if (chunk.length > 4) text += chunk + ' '; chunk = ''; }
       }
-      text = text.replace(/\s+/g, ' ').trim();
-      console.log(`DOC extracted ${text.length} characters`);
-      return text;
-    } catch(e) {
-      return '';
-    }
+      return text.replace(/\s+/g, ' ').trim();
+    } catch(e) { return ''; }
   } else {
     try {
-      const text = file.buffer.toString('utf-8').replace(/\s+/g, ' ').trim();
-      console.log(`TXT extracted ${text.length} characters`);
-      return text;
-    } catch(e) {
-      return '';
-    }
+      return file.buffer.toString('utf-8').replace(/\s+/g, ' ').trim();
+    } catch(e) { return ''; }
   }
 }
 
@@ -115,9 +149,9 @@ app.post("/extract", upload.fields([{ name: 'resumeFile', maxCount: 1 }]), async
     resume = await extractTextFromFile(req.files.resumeFile[0]);
   }
 
-  console.log(`Extract request - resume text length: ${resume.length}`);
+  console.log(`Extract - resume text length: ${resume.length}`);
 
-  if (!resume || resume.length < 30) return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "Could not read file. Text too short or file is image-based." });
+  if (!resume || resume.length < 30) return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "Could not read file. File may be image-based or corrupted." });
   if (!apiKey) return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "GROQ_API_KEY is missing." });
 
   try {
@@ -147,7 +181,6 @@ Return ONLY this JSON:
     });
     const data = await response.json();
     const raw = data?.choices?.[0]?.message?.content || "";
-    console.log('AI response:', raw.substring(0, 200));
     const first = raw.indexOf("{"); const last = raw.lastIndexOf("}");
     if (first === -1 || last === -1) return res.json({ name: "", phone: "", email: "", city: "", education: "", error: "AI did not return valid JSON." });
     let result;
